@@ -1,0 +1,667 @@
+---
+title: "R Markdown to PowerPoint Presentation"
+author: "Martin"
+date: "`r Sys.Date()`"
+output: powerpoint_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, cache = TRUE, fig.width = 10, fig.height = 6, fig.asp = 0.618)
+library(nycflights13)
+library(knitr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+```
+
+# Why would you use R Markdown?
+
+## Firstly - Why would you use R?
+
+:::::: {.columns}
+::: {.column}
+
+### Advantages
+
+- Free and Open Source
+- Provides powerful data analysis and visualization tools
+- Reproducibility and documentation easy via R Markdown
+
+:::
+
+::: {.column}
+
+![RStudio logo (R's IDE)](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\RStudio_logo.png){#fig:rstudio-logo}
+
+:::
+::::::
+
+## Lets see R in action!
+
+#### Lets look at all flights that departed NYC (i.e. JRK, LGA or EWR) in 2013 and do some analysis.
+
+```{r nycflights13-flights-p1, echo = FALSE}
+flights |> 
+  select(year:dep_delay, carrier, flight)
+```
+
+## Flights overview continued...
+
+```{r nycflights13-flights-p2}
+flights |> 
+  select(origin, dest, air_time, distance, hour, minute, time_hour)
+```
+
+
+## Data cleaning and preprocessing
+
+Number of missing values per column
+
+```{r data-cleaning-missing_values, warning = FALSE}
+missing_vals <- colSums(is.na(flights))
+cols_with_missing <- names(which(missing_vals > 0))
+missing_flights <- flights |> select(cols_with_missing)
+
+colSums(is.na(missing_flights))
+```
+
+### Missing values could be due to:
+
+- Cancelled flights
+- Sadly, some are crashed flights
+- Legitimate data entry errors (Explicit vs implicit missing values)
+
+## Look out for outliers
+
+```{r data-cleaning-outliers, warning = FALSE, cache = TRUE}
+# 13 RD4S_2E_numbers.Rmd
+flights |> 
+  group_by(origin, dest) |> 
+  ggplot(aes(y = air_time, x = dest)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  labs(
+    x = "Destination",
+    y = "Air Time (minutes)",
+    title = "Boxplot distribution for each origin destination pair",
+    caption = "Data from RITA, Bureau of transportation statistics"
+  )
+```
+
+## Check for inconsistencies
+
+:::::: {.columns}
+::: {.column}
+
+```{r data-cleaning-inconsistencies, cache = TRUE, warning = FALSE}
+flights_EGE <- flights |> 
+  filter(dest == "EGE")
+
+flights_EGE |> 
+  group_by(origin, dest, distance) |> 
+  summarize(
+    n = n(),
+    .groups = "drop"
+  ) |> 
+  ggplot(aes(origin, distance)) +
+  geom_point() +
+  labs(
+    title = "EGE airport appears to have moved",
+    subtitle = "Two different distances from EWR & JFK to EGE suggest this change",
+    x = "Origin Airport",
+    y = "Distance (miles)"
+  ) +
+  theme_bw()
+```
+
+:::
+
+::: {.column}
+
+### Other things to check
+
+- Are related columns consistent? (e.g. Does departure delay = departure time - scheduled departure time)
+- Do values make sense (We can't have a negative distance!)
+
+:::
+::::::
+
+## Exploratory Data Analysis
+
+:::::: {.columns}
+::: {.column}
+
+```{r EDA-dep-times-count-year}
+make_datetime_100 <- function(year, month, day, time) {
+  make_datetime(year, month, day, time %/% 100, time %% 100)
+}
+
+flights_dt <- flights |> 
+  filter(!is.na(dep_time), !is.na(arr_time)) |> 
+  mutate(
+    dep_time = make_datetime_100(year, month, day, dep_time),
+    arr_time = make_datetime_100(year, month, day, arr_time),
+    sched_dep_time = make_datetime_100(year, month, day, sched_dep_time),
+    sched_arr_time = make_datetime_100(year, month, day, sched_arr_time)
+  ) |> 
+  select(origin, dest, ends_with("delay"), ends_with("time"))
+
+flights_dt |> 
+  ggplot(aes(x = dep_time)) + 
+  labs(
+    title = "Distribution of departure times over the year",
+    x = "Departure time (minutes)",
+    y = "Count"
+  ) +
+  geom_freqpoly(binwidth = 86400) +
+  theme_bw()
+```
+
+:::
+
+::: {.column}
+
+### Distribution of departure times across the year
+
+- Why was there a drop somewhere around February?
+
+:::
+::::::
+
+
+## Average delay within the hour (Departure time)
+
+:::::: {.columns}
+::: {.column}
+
+```{r EDA-avg-delay-hour}
+flights_dt |> 
+  mutate(minute = minute(dep_time)) |> 
+  group_by(minute) |> 
+  summarize(
+    avg_delay = mean(dep_delay, na.rm = TRUE),
+    n = n()
+  ) |> 
+  ggplot(aes(x = minute, y = avg_delay)) +
+  labs(
+    x = "Minute",
+    y = "Average delay (minutes)"
+  ) +
+  geom_line() +
+  theme_bw()
+```
+
+:::
+
+::: {.column}
+
+### What can we observe?
+
+- Lower average delays around 25 and 55 minutes
+- Peak of about 18 minutes delay around 17 minute hour mark
+
+:::
+::::::
+
+## Average delay within the hour (Scheduled departure time)
+
+:::::: {.columns}
+::: {.column}
+
+```{r EDA-avg-delay-hour-scheduled}
+sched_dep <- flights_dt |> 
+  mutate(minute = minute(sched_dep_time)) |> 
+  group_by(minute) |> 
+  summarize(
+    avg_delay = mean(arr_delay, na.rm = TRUE),
+    n = n()
+  )
+
+ggplot(sched_dep, aes(x = minute, y = avg_delay)) +  
+  labs(
+    x = "Minute",
+    y = "Average delay (minutes)"
+  ) +
+  geom_line() +
+  theme_bw()
+```
+
+:::
+
+::: {.column}
+
+### What do we observe now?
+
+- No pattern
+- Our line is far "Spikier" in its appearance
+
+### What does this suggest?
+
+- Some sort of manipulation is present
+- Likely due to human bias around wanting nice looking scheduled departure times
+- Previous graph is a better representation of average delays
+
+:::
+::::::
+
+## What day of the week should I leave to minimise delay?
+
+:::::: {.columns}
+::: {.column}
+
+```{r Best week day}
+flights_dt |> 
+  mutate(wday = wday(sched_dep_time, label = TRUE)) |> 
+  mutate(wday = factor(wday, levels = c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))) |> 
+  group_by(wday) |> 
+  summarize(
+    avg_delay = mean(dep_delay, na.rm = TRUE),
+    n = n()
+  ) |> 
+  ggplot(aes(wday, avg_delay)) +
+  geom_histogram(stat = "identity") +  
+  labs(
+    title = "Average delay for each respective weekday",
+    subtitle = "Saturday best day to leave to avoid delays",
+    x = "Weekday",
+    y = "Average delay (minutes)"
+  ) +
+  theme_bw()
+# Best day of the week to leave is on a Saturday
+```
+
+:::
+
+::: {.column}
+
+### Best days of the week
+
+- Saturday with only an average delay of 7.5 mins!
+- Interestingly, Sunday is slightly worse than Tuesday (Weekend vs Workweek)
+
+### Worst days of the week
+
+- Thursday at about 16 mins!
+- Monday unsurprisingly, as well as Friday (People wanting to go home or elsewhere)
+
+:::
+::::::
+
+## Do non-cancelled flights effect cancelled flights?
+
+```{r non-cancelled-cancelled-flights-p1}
+cancelled_flights <- nycflights13::flights |> 
+  mutate(
+    cancelled = is.na(dep_time),
+    sched_hour = sched_dep_time %/% 100,
+    sched_min = sched_dep_time %% 100,
+    sched_dep_time = sched_hour + (sched_min / 60)
+  ) |> 
+  ggplot(aes(x = sched_dep_time)) +   
+  labs(
+    title = "Distribution of non-cancelled flights (red) vs cancelled flights (blue)",
+    x = "Scheduled departure time (minutes)",
+    y = "Count"
+  ) +
+  geom_freqpoly(aes(color = cancelled), binwidth = 1/4)
+
+cancelled_flights +
+  facet_wrap(~cancelled, scales = "free_y")
+```
+
+## Overlapping density comparison
+
+```{r non-cancelled-cancelled-flights-p2}
+nycflights13::flights |> 
+  mutate(
+    cancelled = is.na(dep_time),
+    sched_hour = sched_dep_time %/% 100,
+    sched_min = sched_dep_time %% 100,
+    sched_dep_time = sched_hour + (sched_min / 60)
+  ) |> 
+  ggplot(aes(x = sched_dep_time, y = after_stat(density))) +  
+  labs(
+    title = "Density plot of non-cancelled flights (red) vs cancelled flights (blue)",
+    subtitle = "Density of cancelled flights closely follows that of non-cancelled flights",
+    x = "Scheduled departure time (minutes)",
+    y = "Density"
+  ) +
+  geom_freqpoly(aes(color = cancelled), binwidth = 1/4)
+```
+
+## Joining with other datasets
+
+#### nycflights13 has other datasets such as one called airports
+
+```{r nycflights13-airports}
+# See relational-data.Rmd in our solutions for more info
+airports |> 
+  select(-name) |> 
+  head(3)
+```
+
+## Geospatial visualisation of average delays
+
+```{r geospatial-delays}
+avg_delay <- flights |> 
+  group_by(dest) |> 
+  mutate(avg_delay = mean(arr_delay, na.rm = TRUE)) |> 
+  ungroup()
+
+avg_delay_plane_join <- avg_delay  |> 
+  left_join(airports, join_by(dest == faa))
+
+avg_delay_plane_join |>
+  filter(lon >= -130) |> 
+  ggplot(aes(x = lon, y = lat)) + 
+    labs(
+      x = "Longitude",
+      y = "Latitude"
+    ) +
+    borders("state") +
+    geom_point(aes(colour = avg_delay, size = avg_delay)) +
+    coord_quickmap()
+```
+
+## What happened on June 13 2013?
+
+:::::: {.columns}
+::: {.column}
+
+```{r June 13th 2013}
+june_13 <- flights |> 
+  filter(month == 6, day == 13) |> 
+  group_by(dest) |> 
+  mutate(avg_delay = mean(arr_delay, na.rm = TRUE)) |> 
+  ungroup()
+
+airports |>
+  inner_join(june_13, join_by(faa == dest)) |>
+  filter(lon >= -140) |> # Filter out the single outlier
+  ggplot(aes(x = lon, y = lat, size = avg_delay, colour = avg_delay)) +
+    labs(
+      x = "Longitude",
+      y = "Latitude"
+    ) +
+    borders("state") +
+    geom_point() +
+    coord_quickmap()
+# Very high delays at the east region of america.
+```
+
+:::
+
+::: {.column}
+
+### Very high delays in the eastern region of America
+
+- Why?
+
+:::
+::::::
+
+## After a bit of Googling...
+
+![](https://steelbluemedia.com/wp-content/uploads/2019/06/new-google-favicon-512.png){#fig:Google-logo}
+
+## Two derecho series storms occurred
+
+![](https://cdn.weatherworksinc.com/blogs/NWS%20Wiki%20Derecho%20with%20Storm%20Reports.png)
+
+# Why would you want to create a PowerPoint Presentation from R Markdown?
+
+## PowerPoint is universal
+
+:::::: {.columns}
+::: {.column}
+
+### Commonly used communication software
+
+- Estimates of 20 million over 16's in the UK have used PowerPoint before
+- Very common in business
+- Anecdotally, I had to use PowerPoint in highschool
+
+### Even if you hate PowerPoint
+
+- Most people use Windows - It's Window's software
+- Ease of use
+- It's not going away anytime soon
+
+:::
+
+::: {.column}
+
+![](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\PowerPoint_logo.png){#fig:powerpoint-logo}
+
+:::
+::::::
+
+## Why would you use R Markdown?
+
+:::::: {.columns}
+::: {.column}
+
+### Easily reproducible
+
+- Seamless integration of code and text (prose) to produce high quality reports
+- Easy creation of dynamic reports
+
+### Multiple formats
+
+- Supports various output formats (HTML, PDF, Word)
+- and of course... PowerPoint!
+
+### And more
+
+- Supports interactive elements and widgets
+- Integrates with Git, useful for collaboration
+
+:::
+
+::: {.column}
+
+![](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\RMarkdown_logo.png){#fig:rmarkdown-logo}
+
+:::
+::::::
+
+## Here's an example
+
+:::::: {.columns}
+::: {.column}
+
+![](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\RMarkdown_example.png){#fig:rmarkdown-example}
+
+:::
+
+::: {.column}
+
+- Combination of prose and code
+- Can obscure our code for presentation purposes
+- Allows us to add comments about the "Why?" of our code for future-self/others
+
+:::
+::::::
+
+
+## Combines two great things
+
+:::::: {.columns}
+::: {.column}
+
+![](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\RMarkdown_logo.png){#fig:rmarkdown-logo}
+
+:::
+
+::: {.column}
+
+![](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\PowerPoint_logo.png){#fig:powerpoint-logo}
+
+:::
+::::::
+
+## Demo: Creating a PowerPoint Presentation from R Markdown
+
+![](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\01_ppt_demo_new.png){#fig:ppt-demo-new-1}
+
+![](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\02_ppt_demo_new.png){#fig:ppt-demo-new-2}
+
+![](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\03_ppt_demo_new.png){#fig:ppt-demo-new-3}
+
+![](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\04_ppt_demo_new.png){#fig:ppt-demo-new-4}
+
+![](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\05_ppt_demo_new.png){#fig:ppt-demo-new-5}
+
+## R Markdown
+
+This is an R Markdown presentation. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document.
+
+## Slide with Bullets
+
+- Bullet 1
+- Bullet 2
+- Bullet 3
+
+## Slide with R Output
+
+```{r cars, echo = TRUE}
+summary(cars)
+```
+
+## Slide with Plot
+
+```{r pressure}
+plot(pressure)
+```
+
+## Or simply render from a pre-existing RMarkdown document
+
+![](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\01_ppt_demo_existing.png){#fig:ppt-demo-existing-1}
+
+## How it works
+
+:::::: {.columns}
+::: {.column}
+
+![](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\RMarkdown_logo.png){#fig:rmarkdown-logo}
+
+:::
+
+::: {.column}
+
+![](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\PowerPoint_logo.png){#fig:powerpoint-logo}
+
+:::
+::::::
+
+# Benefits of Markdown
+
+## Basic formatting
+
+:::::: {.columns}
+::: {.column}
+
+- \*italic\*
+- \*\*bold\*\*
+- \~\~strikeout\~\~
+- \~subscript\~
+- \^superscript\^
+
+:::
+
+::: {.column}
+
+- *italic*
+- **bold**
+- ~~strikeout~~
+- ~subscript~
+- ^superscript^
+
+:::
+::::::
+
+## Images from file or the Web
+
+:::::: {.columns}
+::: {.column}
+
+\!\[\](https://.../new-google-favicon-512.png){#fig:Google-logo}
+
+![](https://steelbluemedia.com/wp-content/uploads/2019/06/new-google-favicon-512.png){#fig:Google-logo}
+
+:::
+
+::: {.column}
+
+\!\[\](C:...Markdown_logo.png){#fig:markdown-logo}
+
+![](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\Markdown_logo.png){#fig:markdown-logo}
+
+:::
+::::::
+
+## Columns
+
+:::::: {.columns}
+::: {.column}
+
+Supports two column layout by doing the following on the right. Contents are sandwiched between the colons.
+
+:::
+
+::: {.column}
+
+\:::::: {.columns}
+\::: {.column}
+
+Column #1 content
+
+\:::
+
+\::: {.column}
+
+Column #2 content
+
+\:::
+\::::::
+
+:::
+::::::
+
+## Obviously, R code as well
+
+:::::: {.columns}
+::: {.column}
+
+- Tables
+- Plots
+- Syntax highlighting
+
+:::
+
+::: {.column}
+
+![](C:\Users\M\OneDrive\Documents\R\R Misc Projects\RMarkdown_PowerPoint\images\R_logo.png){#fig:R-logo}
+
+:::
+::::::
+
+## Thats how easy it is
+
+### For further fine tuning, you may need:
+
+- R2PPT
+- OfficeR
+- Displayr
+
+## Summary
+
+- Learnt about R and some examples of what it can do
+- Why you would want to use R Markdown
+- How easy it is to make a PowerPoint Presentation from R Markdown
+
+# Any questions?

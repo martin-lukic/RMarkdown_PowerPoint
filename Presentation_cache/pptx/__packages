@@ -1,0 +1,12 @@
+nycflights13
+knitr
+dplyr
+ggplot2
+tidyverse
+tibble
+tidyr
+readr
+purrr
+stringr
+forcats
+lubridate
